@@ -65,6 +65,12 @@ export default function AdminCRM() {
   const [activeTab, setActiveTab] = useState<'pipeline' | 'table' | 'csv' | 'logs' | 'admins'>('pipeline');
   const [selectedStartup, setSelectedStartup] = useState<Startup | null>(null);
 
+  // Pagination states
+  const [startupCurrentPage, setStartupCurrentPage] = useState(1);
+  const [logCurrentPage, setLogCurrentPage] = useState(1);
+  const startupsPerPage = 10;
+  const logsPerPage = 20;
+
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSector, setSelectedSector] = useState('All');
@@ -72,8 +78,27 @@ export default function AdminCRM() {
   const [sortBy, setSortBy] = useState<'name' | 'raise' | 'date'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
+  useEffect(() => {
+    setStartupCurrentPage(1);
+  }, [searchTerm, selectedSector, selectedStage]);
+
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Pending request promotion query parameters
+  const [pendingApproveId, setPendingApproveId] = useState<string | null>(null);
+  const [pendingApproveEmail, setPendingApproveEmail] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const approveId = params.get('approve_id');
+    const approveEmail = params.get('approve_email');
+    if (approveId && approveEmail) {
+      setPendingApproveId(approveId);
+      setPendingApproveEmail(approveEmail);
+    }
+  }, [location.search]);
 
   useEffect(() => {
     checkActiveSession();
@@ -179,24 +204,36 @@ export default function AdminCRM() {
 
   const handleUpdateStatus = async (id: string, status: PipelineStatus) => {
     if (!currentUser) return;
+
+    // Save previous state for potential rollback
+    const previousStartups = [...startups];
+    const previousSelectedStartup = selectedStartup ? { ...selectedStartup } : null;
+
+    // 1. Apply optimistic local state update immediately
+    setStartups(prev =>
+      prev.map(s => (s.id === id ? { ...s, status, updated_at: new Date().toISOString() } : s))
+    );
+    if (selectedStartup && selectedStartup.id === id) {
+      setSelectedStartup(prev => (prev ? { ...prev, status } : null));
+    }
+
     try {
       const success = await dbService.updateStartupStatus(id, status, currentUser);
       if (success) {
-        // Optimistic local state update
-        setStartups(prev =>
-          prev.map(s => (s.id === id ? { ...s, status, updated_at: new Date().toISOString() } : s))
-        );
-        // Refresh audit logs
+        // Refresh audit logs upon confirmed success
         const logs = await dbService.getAuditLogs();
         setAuditLogs(logs);
-
-        // Update selected startup drawer if active
-        if (selectedStartup && selectedStartup.id === id) {
-          setSelectedStartup(prev => (prev ? { ...prev, status } : null));
-        }
+      } else {
+        // Rollback if service fails to update
+        setStartups(previousStartups);
+        setSelectedStartup(previousSelectedStartup);
+        alert('Failed to update status on the server. Change reverted.');
       }
     } catch (err: any) {
       console.error(err);
+      // Rollback on network/RLS exception
+      setStartups(previousStartups);
+      setSelectedStartup(previousSelectedStartup);
       alert('Failed to update status: ' + err.message);
     }
   };
@@ -263,6 +300,14 @@ export default function AdminCRM() {
     setTimeout(() => setCopiedText(false), 2000);
   };
 
+  const handleCopyRequestLink = () => {
+    if (!currentUser) return;
+    const link = `${window.location.origin}/admin/login?approve_id=${currentUser.id}&approve_email=${encodeURIComponent(currentUser.email)}`;
+    navigator.clipboard.writeText(link);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
   // Pipeline Board structure
   const pipelineStatuses: PipelineStatus[] = [
     'New',
@@ -306,6 +351,16 @@ export default function AdminCRM() {
     if (valueA > valueB) return sortOrder === 'asc' ? 1 : -1;
     return 0;
   });
+
+  // Paginated Startups for Table View
+  const startupStartIndex = (startupCurrentPage - 1) * startupsPerPage;
+  const paginatedStartups = sortedStartups.slice(startupStartIndex, startupStartIndex + startupsPerPage);
+  const totalStartupPages = Math.ceil(sortedStartups.length / startupsPerPage);
+
+  // Paginated Audit Logs
+  const logStartIndex = (logCurrentPage - 1) * logsPerPage;
+  const paginatedLogs = auditLogs.slice(logStartIndex, logStartIndex + logsPerPage);
+  const totalLogPages = Math.ceil(auditLogs.length / logsPerPage);
 
   // Unique list of sectors and stages for filter buttons
   const availableSectors = ['All', ...Array.from(new Set(startups.map(s => s.sector)))];
@@ -485,11 +540,30 @@ export default function AdminCRM() {
                 </div>
               </div>
 
+              {/* 1-Click Request Link Block */}
+              <div className="p-5 bg-neutral-50 border border-neutral-200 rounded-xl space-y-3 text-left">
+                <div className="flex items-center gap-2 text-neutral-900 font-bold text-xs uppercase tracking-wider">
+                  <UserPlus className="h-4 w-4 text-neutral-650" />
+                  <span>Option 1: 1-Click Request Link (Recommended)</span>
+                </div>
+                <p className="text-neutral-500 text-[11px] leading-relaxed">
+                  Generate a pre-filled, secure invitation request link. Send this link to an existing admin, who can approve and authorize your credentials instantly in one click without manually typing your ID.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCopyRequestLink}
+                  className="w-full py-2 bg-neutral-900 hover:bg-neutral-850 text-white font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {copiedLink ? <Check className="h-3.5 w-3.5 text-green-400" /> : <UserPlus className="h-3.5 w-3.5" />}
+                  {copiedLink ? 'Copied Request Link!' : 'Copy 1-Click Invite Link'}
+                </button>
+              </div>
+
               {/* Setup / Bootstrap Instructions */}
               <div className="p-5 bg-neutral-900 text-white rounded-xl text-left space-y-3 text-xs">
                 <div className="flex items-center gap-2 text-amber-400 font-bold">
                   <Building className="h-4 w-4" />
-                  <span>Bootstrapping Instructions</span>
+                  <span>Option 2: Direct Database Bootstrapping</span>
                 </div>
                 <p className="text-neutral-300 text-[11px] leading-relaxed">
                   If you are the developer or first team member bootstrapping this CRM, please copy your User ID above and execute the following SQL statement in your <b>Supabase SQL Editor</b> to authorize yourself:
@@ -538,6 +612,65 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
   // 3. Fully Authorized Admin CRM Screen
   return (
     <div className="space-y-6" id="admin-crm-dashboard">
+      {/* Pending admin request banner */}
+      {pendingApproveId && pendingApproveEmail && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-5 bg-amber-50 border border-amber-250 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-3xs text-left"
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-amber-950 font-bold text-sm">
+              <ShieldCheck className="h-4.5 w-4.5 text-amber-600" />
+              <span>Pending Administrator Access Request</span>
+            </div>
+            <p className="text-amber-800 text-xs leading-relaxed">
+              A pre-verified registration request was received for <span className="font-semibold text-neutral-900">{pendingApproveEmail}</span>. 
+              Review the credentials and click below to authorize full administrator access.
+            </p>
+            <div className="text-[10px] text-amber-700/80 font-mono">
+              USER UUID: {pendingApproveId}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={async () => {
+                setAdminActionLoading(true);
+                try {
+                  const success = await dbService.addAdmin(pendingApproveId, pendingApproveEmail);
+                  if (success) {
+                    setAdminActionSuccess(`Successfully authorized ${pendingApproveEmail} as Admin.`);
+                    setPendingApproveId(null);
+                    setPendingApproveEmail(null);
+                    navigate('/admin', { replace: true });
+                    await fetchCRMData();
+                  }
+                } catch (err: any) {
+                  alert('Error authorizing admin: ' + err.message);
+                } finally {
+                  setAdminActionLoading(false);
+                }
+              }}
+              disabled={adminActionLoading}
+              className="px-3.5 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-3xs disabled:opacity-50"
+            >
+              {adminActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <UserPlus className="h-3 w-3" />}
+              Approve & Grant Access
+            </button>
+            <button
+              onClick={() => {
+                setPendingApproveId(null);
+                setPendingApproveEmail(null);
+                navigate('/admin', { replace: true });
+              }}
+              className="px-3.5 py-1.5 border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-600 rounded-lg text-xs font-semibold cursor-pointer"
+            >
+              Decline
+            </button>
+          </div>
+        </motion.div>
+      )}
+
       {/* Dashboard Top Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-neutral-200 rounded-xl p-6 shadow-3xs">
         <div className="space-y-1">
@@ -818,7 +951,7 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
                       </td>
                     </tr>
                   ) : (
-                    sortedStartups.map(s => (
+                    paginatedStartups.map(s => (
                       <tr
                         key={s.id}
                         onClick={() => setSelectedStartup(s)}
@@ -870,6 +1003,47 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
                 </tbody>
               </table>
             </div>
+
+            {totalStartupPages > 1 && (
+              <div className="px-6 py-4 bg-neutral-50/50 border-t border-neutral-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <span className="text-neutral-500">
+                  Showing <span className="font-semibold text-neutral-800">{startupStartIndex + 1}</span> to{' '}
+                  <span className="font-semibold text-neutral-800">
+                    {Math.min(startupStartIndex + startupsPerPage, sortedStartups.length)}
+                  </span>{' '}
+                  of <span className="font-semibold text-neutral-800">{sortedStartups.length}</span> records
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setStartupCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={startupCurrentPage === 1}
+                    className="px-3 py-1.5 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:hover:bg-transparent font-medium cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: totalStartupPages }, (_, i) => i + 1).map(pageNum => (
+                    <button
+                      key={pageNum}
+                      onClick={() => setStartupCurrentPage(pageNum)}
+                      className={`px-3 py-1.5 border rounded-lg font-medium transition-all cursor-pointer ${
+                        startupCurrentPage === pageNum
+                          ? 'bg-neutral-900 border-neutral-900 text-white shadow-2xs'
+                          : 'border-neutral-200 hover:bg-neutral-50 text-neutral-600'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setStartupCurrentPage(p => Math.min(totalStartupPages, p + 1))}
+                    disabled={startupCurrentPage === totalStartupPages}
+                    className="px-3 py-1.5 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:hover:bg-transparent font-medium cursor-pointer"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : activeTab === 'csv' ? (
           /* CSV BATCH IMPORT TAB */
@@ -908,7 +1082,7 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
                       </td>
                     </tr>
                   ) : (
-                    auditLogs.map(log => (
+                    paginatedLogs.map(log => (
                       <tr key={log.id} className="hover:bg-neutral-50/50 text-left">
                         <td className="px-6 py-3 text-neutral-400 whitespace-nowrap">
                           {new Date(log.created_at).toLocaleString()}
@@ -941,6 +1115,57 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
                 </tbody>
               </table>
             </div>
+
+            {totalLogPages > 1 && (
+              <div className="px-6 py-4 bg-neutral-50/50 border-t border-neutral-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-sans">
+                <span className="text-neutral-500">
+                  Showing <span className="font-semibold text-neutral-800">{logStartIndex + 1}</span> to{' '}
+                  <span className="font-semibold text-neutral-800">
+                    {Math.min(logStartIndex + logsPerPage, auditLogs.length)}
+                  </span>{' '}
+                  of <span className="font-semibold text-neutral-800">{auditLogs.length}</span> entries
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setLogCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={logCurrentPage === 1}
+                    className="px-3 py-1.5 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:hover:bg-transparent font-semibold cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: Math.min(5, totalLogPages) }, (_, i) => {
+                    let pageNum = i + 1;
+                    if (logCurrentPage > 3) {
+                      pageNum = logCurrentPage - 3 + i;
+                    }
+                    if (pageNum + (5 - i - 1) > totalLogPages) {
+                      pageNum = Math.max(1, totalLogPages - 4 + i);
+                    }
+                    if (pageNum > totalLogPages) return null;
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setLogCurrentPage(pageNum)}
+                        className={`px-3 py-1.5 border rounded-lg font-semibold transition-all cursor-pointer ${
+                          logCurrentPage === pageNum
+                            ? 'bg-neutral-900 border-neutral-900 text-white shadow-2xs'
+                            : 'border-neutral-200 hover:bg-neutral-50 text-neutral-600'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setLogCurrentPage(p => Math.min(totalLogPages, p + 1))}
+                    disabled={logCurrentPage === totalLogPages}
+                    className="px-3 py-1.5 border border-neutral-200 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:hover:bg-transparent font-semibold cursor-pointer"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* ADMIN MANAGEMENT VIEW */

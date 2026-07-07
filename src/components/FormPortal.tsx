@@ -186,6 +186,17 @@ export default function FormPortal() {
     e.preventDefault();
     setSubmitError('');
 
+    // Check rate limit / spam protection (60 seconds cooldown)
+    const lastSubmission = localStorage.getItem('last_submission_time');
+    if (lastSubmission) {
+      const msSinceLast = Date.now() - Number(lastSubmission);
+      if (msSinceLast < 60000) {
+        const secondsLeft = Math.ceil((60000 - msSinceLast) / 1000);
+        setSubmitError(`Anti-Spam Security Protection: Please wait ${secondsLeft} seconds before submitting another application to the pipeline.`);
+        return;
+      }
+    }
+
     if (!validateForm()) {
       // Scroll to first error
       const firstErrorKey = Object.keys(errors)[0];
@@ -200,6 +211,8 @@ export default function FormPortal() {
     try {
       const response = await dbService.submitApplication(formData);
       if (response.success && response.id) {
+        // Record successful submission time for anti-spam tracking
+        localStorage.setItem('last_submission_time', String(Date.now()));
         setSubmittedId(response.id);
         setIsSuccess(true);
       } else {

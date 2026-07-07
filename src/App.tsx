@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import FormPortal from './components/FormPortal';
 import { isSupabaseConfigured } from './services/dbService';
 import { ShieldAlert } from 'lucide-react';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const AdminCRM = lazy(() => import('./components/AdminCRM'));
 
@@ -45,22 +46,24 @@ export default function App() {
         <main className="flex-1 overflow-y-auto">
           <Routes>
             {/* Route / -> FormPortal (public, no auth, no admin code loaded) */}
-            <Route path="/" element={<FormPortal />} />
+            <Route path="/" element={<ErrorBoundary fallbackTitle="Form Submission Error"><FormPortal /></ErrorBoundary>} />
 
             {/* Route /admin/* -> the CRM shell, lazy-loaded */}
             <Route
               path="/admin/*"
               element={
-                <Suspense
-                  fallback={
-                    <div className="flex flex-col items-center justify-center min-h-screen gap-3 bg-neutral-50/50">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900"></div>
-                      <span className="text-xs text-neutral-400 font-mono">Loading Admin CRM...</span>
-                    </div>
-                  }
-                >
-                  <AdminCRM />
-                </Suspense>
+                <ErrorBoundary fallbackTitle="Admin CRM Error">
+                  <Suspense
+                    fallback={
+                      <div className="flex flex-col items-center justify-center min-h-screen gap-3 bg-neutral-50/50">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900"></div>
+                        <span className="text-xs text-neutral-400 font-mono">Loading Admin CRM...</span>
+                      </div>
+                    }
+                  >
+                    <AdminCRM />
+                  </Suspense>
+                </ErrorBoundary>
               }
             />
 

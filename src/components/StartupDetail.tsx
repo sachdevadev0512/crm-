@@ -27,6 +27,8 @@ export default function StartupDetail({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [notesLoading, setNotesLoading] = useState(false);
+  const [cachedSignedUrl, setCachedSignedUrl] = useState<string | null>(null);
+  const [signedUrlExpiry, setSignedUrlExpiry] = useState<number | null>(null);
 
   useEffect(() => {
     fetchNotes();
@@ -47,8 +49,18 @@ export default function StartupDetail({
   const handleDownloadPitchDeck = async () => {
     setIsDownloading(true);
     try {
+      // Check if we have a valid non-expired signed URL cached in state (with 5 minutes safety threshold)
+      if (cachedSignedUrl && signedUrlExpiry && Date.now() < signedUrlExpiry - 300000) {
+        window.open(cachedSignedUrl, '_blank');
+        setIsDownloading(false);
+        return;
+      }
+
       const signedUrl = await dbService.getSignedUrl(startup.pitch_deck_path);
       if (signedUrl) {
+        setCachedSignedUrl(signedUrl);
+        // Expiry from Supabase Storage is configured to 3600 seconds (1 hour)
+        setSignedUrlExpiry(Date.now() + 3600000);
         window.open(signedUrl, '_blank');
       } else {
         alert('Could not retrieve a valid download link.');

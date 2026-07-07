@@ -182,6 +182,39 @@ class SupabaseServiceImpl implements DbService {
     const client: any = getSupabase();
     if (!client) throw new Error('Supabase client is not configured');
 
+    // Ensure the user has an active session to allow storage uploads (authenticated role required by RLS)
+    try {
+      const { data: { session } } = await client.auth.getSession();
+      if (!session) {
+        const { error: anonError } = await client.auth.signInAnonymously();
+        if (anonError) {
+          console.warn('Anonymous auth failed, trying to proceed anyway:', anonError);
+        }
+      }
+    } catch (authErr) {
+      console.warn('Error checking/signing in anonymously:', authErr);
+    }
+
+    // Check for duplicate company name submissions (case-insensitive)
+    try {
+      const { data: existingStartup, error: checkError } = await client
+        .from('startups')
+        .select('id')
+        .ilike('company_name', data.company_name.trim())
+        .maybeSingle();
+
+      if (checkError) {
+        console.warn('Duplicate verification skipped due to database error:', checkError);
+      } else if (existingStartup) {
+        throw new Error(`A startup application with the company name "${data.company_name}" has already been submitted to our pipeline.`);
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes('already been submitted')) {
+        throw err;
+      }
+      console.warn('Duplicate verification query issue, continuing with insert:', err);
+    }
+
     // 1. Upload the pitch deck first if it exists
     let pitchDeckPath = '';
     if (data.pitch_deck) {
@@ -492,6 +525,19 @@ class SupabaseServiceImpl implements DbService {
     let skipped = 0;
     const report: string[] = [];
 
+    // 1. Fetch all existing startups to perform in-memory duplicate validation
+    const { data: existing, error: fetchError } = await client
+      .from('startups')
+      .select('company_name');
+
+    if (fetchError) {
+      throw new Error(`Failed to verify existing startups: ${fetchError.message}`);
+    }
+
+    const existingNames = new Set((existing || []).map((s: any) => s.company_name.toLowerCase().trim()));
+    const startupsToInsert: any[] = [];
+    const pendingReports: string[] = [];
+
     for (const item of startupsList) {
       if (!item.company_name) {
         skipped++;
@@ -499,25 +545,19 @@ class SupabaseServiceImpl implements DbService {
         continue;
       }
 
-      // Check duplicates by company name in database
-      const { data: existing, error: findError } = await client
-        .from('startups')
-        .select('id')
-        .ilike('company_name', item.company_name)
-        .maybeSingle();
+      const companyNameTrimmed = item.company_name.trim();
 
-      if (findError) {
-        console.error('Error finding duplicate during import:', findError);
-      }
-
-      if (existing) {
+      if (existingNames.has(companyNameTrimmed.toLowerCase())) {
         skipped++;
-        report.push(`Skipped duplicate: '${item.company_name}' already exists in CRM.`);
+        report.push(`Skipped duplicate: '${companyNameTrimmed}' already exists in CRM.`);
         continue;
       }
 
+      // Add to set to avoid duplicates within the CSV itself
+      existingNames.add(companyNameTrimmed.toLowerCase());
+
       const startupPayload = {
-        company_name: item.company_name,
+        company_name: companyNameTrimmed,
         website: item.website || 'https://example.com',
         one_line_pitch: item.one_line_pitch || 'Imported via CSV',
         description: item.description || 'Imported startup profile.',
@@ -537,32 +577,42 @@ class SupabaseServiceImpl implements DbService {
         status: (item.status as PipelineStatus) || 'New'
       };
 
-      const { data: inserted, error: insertError } = await client
+      startupsToInsert.push(startupPayload);
+      pendingReports.push(`Successfully imported: '${companyNameTrimmed}' (${startupPayload.stage}, Sector: ${startupPayload.sector})`);
+    }
+
+    // 2. Perform bulk insert in a single transactional network request
+    if (startupsToInsert.length > 0) {
+      const { data: insertedRows, error: insertError } = await client
         .from('startups')
-        .insert(startupPayload)
-        .select('id')
-        .single();
+        .insert(startupsToInsert)
+        .select('id, company_name');
 
       if (insertError) {
-        skipped++;
-        report.push(`Failed to import '${item.company_name}': ${insertError.message}`);
-        continue;
+        throw new Error(`Bulk CSV import failed. Database transaction rolled back: ${insertError.message}`);
       }
 
-      const insertedId = inserted?.id || '';
+      imported = insertedRows?.length || 0;
+      report.push(...pendingReports);
 
-      imported++;
-      report.push(`Successfully imported: '${item.company_name}' (${startupPayload.stage}, Sector: ${startupPayload.sector})`);
+      // 3. Bulk insert audit logs for the newly imported startups
+      if (insertedRows && insertedRows.length > 0) {
+        const auditLogsToInsert = insertedRows.map((row: any) => ({
+          user_id: user.id,
+          user_email: user.email,
+          action: 'Application submitted',
+          target_id: row.id,
+          target_name: row.company_name,
+          details: { message: 'Imported via CSV file.', imported_by: user.email }
+        }));
 
-      // Add log
-      await client.from('audit_logs').insert({
-        user_id: user.id,
-        user_email: user.email,
-        action: 'Application submitted',
-        target_id: insertedId,
-        target_name: item.company_name,
-        details: { message: 'Imported via CSV file.', imported_by: user.email }
-      });
+        const { error: logError } = await client.from('audit_logs').insert(auditLogsToInsert);
+        if (logError) {
+          console.warn('Failed to insert audit logs for CSV import:', logError);
+        }
+      }
+    } else {
+      report.push('No new rows were valid for import.');
     }
 
     return { imported, skipped, report };
