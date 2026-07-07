@@ -653,13 +653,25 @@ class SupabaseServiceImpl implements DbService {
     const client: any = getSupabase();
     if (!client) throw new Error('Supabase client is not configured');
 
-    const { error } = await client
+    // Request the deleted row(s) back. If RLS blocks the delete (e.g. the
+    // "Admins delete access" policy from 03_security_fixes.sql denies it, or
+    // that migration hasn't been applied yet), Supabase returns success with
+    // an empty array rather than an error -- so we must check the row count
+    // ourselves instead of assuming success whenever `error` is falsy.
+    const { data, error } = await client
       .from('admins')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .select('id');
 
     if (error) {
       throw error;
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error(
+        'Admin was not removed. This is either not permitted (you cannot revoke your own access or remove the last remaining admin) or the required database policy is missing — see supabase/migrations/03_security_fixes.sql.'
+      );
     }
 
     return true;

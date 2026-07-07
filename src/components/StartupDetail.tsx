@@ -51,7 +51,10 @@ export default function StartupDetail({
     try {
       // Check if we have a valid non-expired signed URL cached in state (with 5 minutes safety threshold)
       if (cachedSignedUrl && signedUrlExpiry && Date.now() < signedUrlExpiry - 300000) {
-        window.open(cachedSignedUrl, '_blank');
+        // noopener,noreferrer prevents the opened document from reaching back
+        // via window.opener (reverse tabnabbing), in case a malicious file
+        // was ever stored under this path.
+        window.open(cachedSignedUrl, '_blank', 'noopener,noreferrer');
         setIsDownloading(false);
         return;
       }
@@ -61,7 +64,7 @@ export default function StartupDetail({
         setCachedSignedUrl(signedUrl);
         // Expiry from Supabase Storage is configured to 3600 seconds (1 hour)
         setSignedUrlExpiry(Date.now() + 3600000);
-        window.open(signedUrl, '_blank');
+        window.open(signedUrl, '_blank', 'noopener,noreferrer');
       } else {
         alert('Could not retrieve a valid download link.');
       }

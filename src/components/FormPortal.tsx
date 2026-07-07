@@ -86,6 +86,24 @@ export default function FormPortal() {
       return;
     }
 
+    // Also check the browser-reported MIME type. This is still client-side and
+    // can be spoofed by a determined attacker, but it catches accidental
+    // mismatches and casual abuse. The authoritative check is enforced server
+    // side via the storage bucket's allowed_mime_types (see
+    // supabase/migrations/03_security_fixes.sql).
+    const allowedMimeTypes = [
+      'application/pdf',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+    if (file.type && !allowedMimeTypes.includes(file.type)) {
+      setErrors((prev) => ({
+        ...prev,
+        pitch_deck: 'File content does not match a valid PDF/PPT/PPTX file.',
+      }));
+      return;
+    }
+
     // Limit file size to 50MB
     if (file.size > 50 * 1024 * 1024) {
       setErrors((prev) => ({
