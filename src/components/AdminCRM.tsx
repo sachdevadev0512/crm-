@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Briefcase,
@@ -71,9 +72,25 @@ export default function AdminCRM() {
   const [sortBy, setSortBy] = useState<'name' | 'raise' | 'date'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
   useEffect(() => {
     checkActiveSession();
   }, []);
+
+  useEffect(() => {
+    if (!isInitializingAuth) {
+      const isLoginPath = location.pathname === '/admin/login';
+      const isAuthAdmin = currentUser && currentUser.isAdmin;
+
+      if (!isAuthAdmin && !isLoginPath) {
+        navigate('/admin/login', { replace: true });
+      } else if (isAuthAdmin && isLoginPath) {
+        navigate('/admin', { replace: true });
+      }
+    }
+  }, [isInitializingAuth, currentUser, location.pathname, navigate]);
 
   const checkActiveSession = async () => {
     setIsInitializingAuth(true);
@@ -313,196 +330,209 @@ export default function AdminCRM() {
     );
   }
 
-  // 1. Unauthenticated Login/Signup Gate
-  if (!currentUser) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[80vh] px-4" id="admin-login-screen">
-        <motion.div
-          initial={{ scale: 0.98, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="w-full max-w-md bg-white border border-neutral-200 rounded-2xl p-8 shadow-xs space-y-6"
-        >
-          <div className="text-center space-y-2">
-            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-neutral-900 text-white">
-              <Lock className="h-5 w-5" />
-            </div>
-            <h1 className="text-xl font-semibold text-neutral-900 tracking-tight">
-              Middha Ventures Admin CRM
-            </h1>
-            <p className="text-neutral-500 text-xs">
-              {isSignUp ? 'Create your internal admin CRM account.' : 'Secure credential gateway for authorized investment team members.'}
-            </p>
-          </div>
+  const isLoginPath = location.pathname === '/admin/login';
+  const isAuthAdmin = currentUser && currentUser.isAdmin;
 
-          {authError && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-700 text-xs">
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>{authError}</span>
-            </div>
-          )}
-
-          {authSuccessMessage && (
-            <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg flex items-start gap-2 text-neutral-600 text-xs">
-              <ShieldCheck className="h-4 w-4 text-neutral-800 shrink-0 mt-0.5" />
-              <span>{authSuccessMessage}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleAuthSubmit} className="space-y-4">
-            <div className="space-y-1.5" id="login_email_input">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-500" htmlFor="email">
-                Business Email
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
-                <input
-                  type="email"
-                  id="email"
-                  placeholder="partner@middhaventures.com"
-                  value={authEmail}
-                  onChange={e => setAuthEmail(e.target.value)}
-                  required
-                  className="w-full pl-9 pr-3 py-2 text-sm bg-neutral-50 border border-neutral-200 focus:border-neutral-900 focus:bg-white rounded-lg transition-colors outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5" id="login_password_input">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-500" htmlFor="password">
-                Password
-              </label>
-              <div className="relative">
-                <Key className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
-                <input
-                  type="password"
-                  id="password"
-                  placeholder="••••••••"
-                  value={authPassword}
-                  onChange={e => setAuthPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className="w-full pl-9 pr-3 py-2 text-sm bg-neutral-50 border border-neutral-200 focus:border-neutral-900 focus:bg-white rounded-lg transition-colors outline-none"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="w-full py-2 bg-neutral-900 hover:bg-neutral-850 disabled:bg-neutral-400 text-white font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              id="btn-login-submit"
+  if (!currentUser || !currentUser.isAdmin) {
+    if (isLoginPath) {
+      if (!currentUser) {
+        // 1. Unauthenticated Login/Signup Gate
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[80vh] px-4" id="admin-login-screen">
+            <motion.div
+              initial={{ scale: 0.98, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="w-full max-w-md bg-white border border-neutral-200 rounded-2xl p-8 shadow-xs space-y-6"
             >
-              {authLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
-              {isSignUp ? 'Register Admin Account' : 'Sign In to CRM'}
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          </form>
-
-          <div className="text-center pt-2 border-t border-neutral-100">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setAuthError('');
-                setAuthSuccessMessage('');
-              }}
-              className="text-[11px] font-semibold text-neutral-500 hover:text-neutral-900 transition-colors"
-            >
-              {isSignUp ? 'Already registered? Sign In instead' : "Don't have an account? Sign Up / Register"}
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // 2. Authenticated but Unauthorized State (Not in public.admins)
-  if (!currentUser.isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 text-center" id="unauthorized-screen">
-        <motion.div
-          initial={{ scale: 0.98, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="w-full max-w-lg bg-white border border-neutral-200 rounded-2xl p-8 shadow-sm space-y-6"
-        >
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 border border-amber-150">
-            <ShieldAlert className="h-5 w-5 text-amber-600" />
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-xl font-semibold text-neutral-900 tracking-tight">
-              Access Authorization Required
-            </h1>
-            <p className="text-neutral-500 text-xs leading-relaxed max-w-md mx-auto">
-              Your credentials are valid as <span className="font-semibold text-neutral-800 font-mono">{currentUser.email}</span>, but your account is not authorized in our <span className="font-mono text-[11px] font-semibold">public.admins</span> registry yet.
-            </p>
-          </div>
-
-          {/* User Details Block */}
-          <div className="p-5 bg-neutral-50 border border-neutral-200 rounded-xl text-left space-y-3 text-xs font-mono">
-            <div className="flex justify-between items-center pb-2 border-b border-neutral-200">
-              <span className="text-[10px] text-neutral-400 uppercase font-bold">Account Metadata</span>
-              <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-bold uppercase">Pending authorization</span>
-            </div>
-            
-            <div className="space-y-2">
-              <div>
-                <span className="text-neutral-400">EMAIL:</span>
-                <span className="text-neutral-850 ml-2 font-bold">{currentUser.email}</span>
-              </div>
-              <div className="flex items-center justify-between bg-neutral-100/60 p-2 rounded border border-neutral-200/50">
-                <div className="truncate">
-                  <span className="text-neutral-400">USER ID:</span>
-                  <span className="text-neutral-850 ml-2 font-bold select-all">{currentUser.id}</span>
+              <div className="text-center space-y-2">
+                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-neutral-900 text-white">
+                  <Lock className="h-5 w-5" />
                 </div>
+                <h1 className="text-xl font-semibold text-neutral-900 tracking-tight">
+                  Middha Ventures Admin CRM
+                </h1>
+                <p className="text-neutral-500 text-xs">
+                  {isSignUp ? 'Create your internal admin CRM account.' : 'Secure credential gateway for authorized investment team members.'}
+                </p>
+              </div>
+
+              {authError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-700 text-xs">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{authError}</span>
+                </div>
+              )}
+
+              {authSuccessMessage && (
+                <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg flex items-start gap-2 text-neutral-600 text-xs">
+                  <ShieldCheck className="h-4 w-4 text-neutral-800 shrink-0 mt-0.5" />
+                  <span>{authSuccessMessage}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <div className="space-y-1.5" id="login_email_input">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-500" htmlFor="email">
+                    Business Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
+                    <input
+                      type="email"
+                      id="email"
+                      placeholder="partner@middhaventures.com"
+                      value={authEmail}
+                      onChange={e => setAuthEmail(e.target.value)}
+                      required
+                      className="w-full pl-9 pr-3 py-2 text-sm bg-neutral-50 border border-neutral-200 focus:border-neutral-900 focus:bg-white rounded-lg transition-colors outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5" id="login_password_input">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-500" htmlFor="password">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Key className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
+                    <input
+                      type="password"
+                      id="password"
+                      placeholder="••••••••"
+                      value={authPassword}
+                      onChange={e => setAuthPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      className="w-full pl-9 pr-3 py-2 text-sm bg-neutral-50 border border-neutral-200 focus:border-neutral-900 focus:bg-white rounded-lg transition-colors outline-none"
+                    />
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => copyToClipboard(currentUser.id)}
-                  className="p-1 hover:bg-neutral-200 rounded text-neutral-500 transition-colors shrink-0 ml-2"
-                  title="Copy User ID to Clipboard"
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full py-2 bg-neutral-900 hover:bg-neutral-850 disabled:bg-neutral-400 text-white font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  id="btn-login-submit"
                 >
-                  {copiedText ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {authLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
+                  {isSignUp ? 'Register Admin Account' : 'Sign In to CRM'}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </form>
+
+              <div className="text-center pt-2 border-t border-neutral-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSignUp(!isSignUp);
+                    setAuthError('');
+                    setAuthSuccessMessage('');
+                  }}
+                  className="text-[11px] font-semibold text-neutral-500 hover:text-neutral-900 transition-colors"
+                >
+                  {isSignUp ? 'Already registered? Sign In instead' : "Don't have an account? Sign Up / Register"}
                 </button>
               </div>
-            </div>
+            </motion.div>
           </div>
+        );
+      } else {
+        // 2. Authenticated but Unauthorized State (Not in public.admins)
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 text-center" id="unauthorized-screen">
+            <motion.div
+              initial={{ scale: 0.98, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="w-full max-w-lg bg-white border border-neutral-200 rounded-2xl p-8 shadow-sm space-y-6"
+            >
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 border border-amber-150">
+                <ShieldAlert className="h-5 w-5 text-amber-600" />
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-xl font-semibold text-neutral-900 tracking-tight">
+                  Access Authorization Required
+                </h1>
+                <p className="text-neutral-500 text-xs leading-relaxed max-w-md mx-auto">
+                  Your credentials are valid as <span className="font-semibold text-neutral-800 font-mono">{currentUser.email}</span>, but your account is not authorized in our <span className="font-mono text-[11px] font-semibold">public.admins</span> registry yet.
+                </p>
+              </div>
 
-          {/* Setup / Bootstrap Instructions */}
-          <div className="p-5 bg-neutral-900 text-white rounded-xl text-left space-y-3 text-xs">
-            <div className="flex items-center gap-2 text-amber-400 font-bold">
-              <Building className="h-4 w-4" />
-              <span>Bootstrapping Instructions</span>
-            </div>
-            <p className="text-neutral-300 text-[11px] leading-relaxed">
-              If you are the developer or first team member bootstrapping this CRM, please copy your User ID above and execute the following SQL statement in your <b>Supabase SQL Editor</b> to authorize yourself:
-            </p>
-            <pre className="p-3 bg-neutral-950 rounded text-amber-300 font-mono text-[10px] overflow-x-auto whitespace-pre select-all">
+              {/* User Details Block */}
+              <div className="p-5 bg-neutral-50 border border-neutral-200 rounded-xl text-left space-y-3 text-xs font-mono">
+                <div className="flex justify-between items-center pb-2 border-b border-neutral-200">
+                  <span className="text-[10px] text-neutral-400 uppercase font-bold">Account Metadata</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-bold uppercase">Pending authorization</span>
+                </div>
+                
+                <div className="space-y-2">
+                  <div>
+                    <span className="text-neutral-400">EMAIL:</span>
+                    <span className="text-neutral-850 ml-2 font-bold">{currentUser.email}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-neutral-100/60 p-2 rounded border border-neutral-200/50">
+                    <div className="truncate font-sans text-xs">
+                      <span className="text-neutral-400 font-mono">USER ID:</span>
+                      <span className="text-neutral-850 ml-2 font-bold select-all font-mono">{currentUser.id}</span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(currentUser.id)}
+                      className="p-1 hover:bg-neutral-200 rounded text-neutral-500 transition-colors shrink-0 ml-2 cursor-pointer"
+                      title="Copy User ID to Clipboard"
+                    >
+                      {copiedText ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Setup / Bootstrap Instructions */}
+              <div className="p-5 bg-neutral-900 text-white rounded-xl text-left space-y-3 text-xs">
+                <div className="flex items-center gap-2 text-amber-400 font-bold">
+                  <Building className="h-4 w-4" />
+                  <span>Bootstrapping Instructions</span>
+                </div>
+                <p className="text-neutral-300 text-[11px] leading-relaxed">
+                  If you are the developer or first team member bootstrapping this CRM, please copy your User ID above and execute the following SQL statement in your <b>Supabase SQL Editor</b> to authorize yourself:
+                </p>
+                <pre className="p-3 bg-neutral-950 rounded text-amber-300 font-mono text-[10px] overflow-x-auto whitespace-pre select-all">
 {`INSERT INTO public.admins (id, email)
 VALUES ('${currentUser.id}', '${currentUser.email}');`}
-            </pre>
-            <p className="text-neutral-400 text-[9px]">
-              Once you run this SQL, click the "Re-Check Authorization Status" button below.
-            </p>
-          </div>
+                </pre>
+                <p className="text-neutral-400 text-[9px]">
+                  Once you run this SQL, click the "Re-Check Authorization Status" button below.
+                </p>
+              </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
-            <button
-              onClick={checkActiveSession}
-              className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 text-white font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Re-Check Authorization Status
-            </button>
-            <button
-              onClick={handleSignOut}
-              className="px-4 py-2 border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              id="btn-unauth-logout"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Sign Out & Switch Account
-            </button>
+              <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                <button
+                  onClick={checkActiveSession}
+                  className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 text-white font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Re-Check Authorization Status
+                </button>
+                <button
+                  onClick={handleSignOut}
+                  className="px-4 py-2 border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  id="btn-unauth-logout"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Sign Out & Switch Account
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </motion.div>
-      </div>
-    );
+        );
+      }
+    } else {
+      // Not on login path and unauthorized -> wait for redirect effect
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+          <RefreshCw className="h-6 w-6 animate-spin text-neutral-400" />
+          <span className="text-xs text-neutral-400 font-mono">Redirecting to secure gateway...</span>
+        </div>
+      );
+    }
   }
 
   // 3. Fully Authorized Admin CRM Screen
@@ -557,123 +587,112 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
         </div>
       )}
 
-      {/* Database Key Banner if using sandbox mode */}
-      {!dbService.isConfigured() && (
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs flex justify-between items-center gap-4">
-          <div className="flex items-start gap-2.5">
-            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold text-amber-900 block">Supabase Keys Missing (Development Sandbox Enabled)</span>
-              <span className="opacity-90">Running in highly durable local local-session simulation. All CRM and application features are fully operational. Add credentials in Secrets panel to connect your real Supabase.</span>
+      {/* Merged Navigation and Filtering Toolbar */}
+      <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-3xs space-y-4">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          {/* Tabs */}
+          <div className="flex flex-wrap gap-1 bg-neutral-50 border border-neutral-200 p-1 rounded-lg text-xs w-full lg:w-auto shrink-0">
+            <button
+              onClick={() => setActiveTab('pipeline')}
+              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'pipeline' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
+              }`}
+              id="tab-pipeline-board"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              Pipeline Board
+            </button>
+            <button
+              onClick={() => setActiveTab('table')}
+              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'table' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
+              }`}
+              id="tab-deal-table"
+            >
+              <Briefcase className="h-3.5 w-3.5" />
+              Deal Table
+            </button>
+            <button
+              onClick={() => setActiveTab('csv')}
+              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'csv' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
+              }`}
+              id="tab-csv-import"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              CSV Import
+            </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'logs' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
+              }`}
+              id="tab-audit-logs"
+            >
+              <History className="h-3.5 w-3.5" />
+              Audit Logs
+            </button>
+            <button
+              onClick={() => setActiveTab('admins')}
+              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'admins' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
+              }`}
+              id="tab-admin-management"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Admin Management
+            </button>
+          </div>
+
+          {/* Filtering options - Only shown for Pipeline & Table */}
+          {(activeTab === 'pipeline' || activeTab === 'table') && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto lg:flex lg:items-center">
+              {/* Search bar */}
+              <div className="relative lg:w-64">
+                <Search className="absolute left-3 top-2 h-3.5 w-3.5 text-neutral-400" />
+                <input
+                  type="text"
+                  placeholder="Search deals..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-neutral-50 border border-neutral-200 focus:border-neutral-900 focus:bg-white rounded-lg transition-colors outline-none h-8"
+                  id="crm-search-input"
+                />
+              </div>
+
+              {/* Sector filter */}
+              <div className="flex items-center gap-2 lg:w-44 bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 h-8">
+                <Filter className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
+                <select
+                  value={selectedSector}
+                  onChange={e => setSelectedSector(e.target.value)}
+                  className="w-full bg-transparent text-xs text-neutral-700 outline-none cursor-pointer py-0.5"
+                >
+                  <option value="All">All Sectors</option>
+                  {availableSectors.filter(s => s !== 'All').map(sec => (
+                    <option key={sec} value={sec}>{sec}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Stage filter */}
+              <div className="flex items-center gap-2 lg:w-44 bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 h-8">
+                <ListFilter className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
+                <select
+                  value={selectedStage}
+                  onChange={e => setSelectedStage(e.target.value)}
+                  className="w-full bg-transparent text-xs text-neutral-700 outline-none cursor-pointer py-0.5"
+                >
+                  <option value="All">All Stages</option>
+                  {availableStages.filter(s => s !== 'All').map(st => (
+                    <option key={st} value={st}>{st}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
-          <span className="px-2 py-0.5 bg-amber-100 border border-amber-300 rounded font-bold text-[9px] uppercase tracking-wider font-mono shrink-0">
-            Sandbox
-          </span>
+          )}
         </div>
-      )}
-
-      {/* Primary Navigation Tabs */}
-      <div className="flex flex-wrap gap-1 bg-white border border-neutral-200 p-1 rounded-lg shadow-3xs text-xs max-w-2xl">
-        <button
-          onClick={() => setActiveTab('pipeline')}
-          className={`px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'pipeline' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
-          }`}
-          id="tab-pipeline-board"
-        >
-          <Layers className="h-3.5 w-3.5" />
-          Pipeline Board
-        </button>
-        <button
-          onClick={() => setActiveTab('table')}
-          className={`px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'table' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
-          }`}
-          id="tab-deal-table"
-        >
-          <Briefcase className="h-3.5 w-3.5" />
-          Deal Table
-        </button>
-        <button
-          onClick={() => setActiveTab('csv')}
-          className={`px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'csv' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
-          }`}
-          id="tab-csv-import"
-        >
-          <FileSpreadsheet className="h-3.5 w-3.5" />
-          CSV Import
-        </button>
-        <button
-          onClick={() => setActiveTab('logs')}
-          className={`px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'logs' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
-          }`}
-          id="tab-audit-logs"
-        >
-          <History className="h-3.5 w-3.5" />
-          Audit Logs
-        </button>
-        <button
-          onClick={() => setActiveTab('admins')}
-          className={`px-4 py-1.5 rounded-md font-semibold text-center transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'admins' ? 'bg-neutral-900 text-white shadow-2xs' : 'text-neutral-500 hover:text-neutral-900'
-          }`}
-          id="tab-admin-management"
-        >
-          <Users className="h-3.5 w-3.5" />
-          Admin Management
-        </button>
       </div>
-
-      {/* FILTER PANEL (Only shown for Pipeline & Table) */}
-      {(activeTab === 'pipeline' || activeTab === 'table') && (
-        <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-3xs grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-          {/* Search bar */}
-          <div className="relative md:col-span-2">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
-            <input
-              type="text"
-              placeholder="Search by company, sector, pitch keywords, founders, hq..."
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs bg-neutral-50 border border-neutral-200 focus:border-neutral-900 focus:bg-white rounded-lg transition-colors outline-none"
-              id="crm-search-input"
-            />
-          </div>
-
-          {/* Sector filter */}
-          <div className="flex items-center gap-2">
-            <Filter className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-            <select
-              value={selectedSector}
-              onChange={e => setSelectedSector(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-neutral-50 border border-neutral-200 focus:border-neutral-900 hover:border-neutral-300 text-xs rounded-lg outline-none cursor-pointer"
-            >
-              <option value="All">All Sectors</option>
-              {availableSectors.filter(s => s !== 'All').map(sec => (
-                <option key={sec} value={sec}>{sec}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Stage filter */}
-          <div className="flex items-center gap-2">
-            <ListFilter className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-            <select
-              value={selectedStage}
-              onChange={e => setSelectedStage(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-neutral-50 border border-neutral-200 focus:border-neutral-900 hover:border-neutral-300 text-xs rounded-lg outline-none cursor-pointer"
-            >
-              <option value="All">All Stages</option>
-              {availableStages.filter(s => s !== 'All').map(st => (
-                <option key={st} value={st}>{st}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
 
       {/* CORE VIEWPORT BOX */}
       <div id="crm-viewport">
@@ -684,16 +703,16 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
           </div>
         ) : activeTab === 'pipeline' ? (
           /* PIPELINE BOARD VIEW */
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-start overflow-x-auto pb-4" id="pipeline-board">
+          <div className="flex gap-4 overflow-x-auto pb-4" id="pipeline-board">
             {pipelineStatuses.map(status => {
               const columnStartups = sortedStartups.filter(s => s.status === status);
               return (
                 <div
                   key={status}
-                  className="bg-neutral-50 border border-neutral-200/60 rounded-xl p-3 space-y-3 min-w-[220px] max-h-[80vh] flex flex-col"
+                  className="bg-neutral-50 border border-neutral-200/60 rounded-xl p-3 min-w-[260px] shrink-0 max-h-[80vh] flex flex-col overflow-hidden"
                 >
-                  {/* Column Header */}
-                  <div className="flex justify-between items-center px-1 border-b border-neutral-200 pb-1.5 shrink-0">
+                  {/* Column Header (Sticky) */}
+                  <div className="sticky top-0 bg-neutral-50 z-10 flex justify-between items-center px-1 border-b border-neutral-200 pb-2 shrink-0">
                     <span className="text-xs font-bold text-neutral-800 tracking-tight">{status}</span>
                     <span className="px-1.5 py-0.5 bg-neutral-200 text-[10px] font-bold rounded-full text-neutral-600 font-mono">
                       {columnStartups.length}
@@ -701,59 +720,67 @@ VALUES ('${currentUser.id}', '${currentUser.email}');`}
                   </div>
 
                   {/* Cards container */}
-                  <div className="space-y-2 overflow-y-auto flex-1 pr-0.5">
+                  <div className="space-y-2 overflow-y-auto flex-1 pr-0.5 pt-2">
                     {columnStartups.length === 0 ? (
                       <div className="text-center py-8 text-[10px] border border-dashed border-neutral-200 rounded-lg text-neutral-400">
                         No deals
                       </div>
                     ) : (
-                      columnStartups.map(s => (
-                        <div
-                          key={s.id}
-                          onClick={() => setSelectedStartup(s)}
-                          className="bg-white border border-neutral-200 hover:border-neutral-900 hover:shadow-2xs p-3 rounded-lg cursor-pointer transition-all space-y-2 text-xs group relative text-left"
-                        >
-                          <div className="flex justify-between items-start gap-2">
-                            <span className="font-semibold text-neutral-900 group-hover:underline line-clamp-1">
-                              {s.company_name}
-                            </span>
-                          </div>
-                          
-                          <p className="text-neutral-500 text-[10px] leading-snug line-clamp-2">
-                            {s.one_line_pitch}
-                          </p>
+                      columnStartups.map(s => {
+                        const showPitch = s.one_line_pitch && 
+                          s.one_line_pitch.trim() !== '' && 
+                          s.one_line_pitch.toLowerCase().trim() !== s.company_name.toLowerCase().trim();
 
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            <span className="px-1.5 py-0.5 bg-neutral-100 text-[9px] font-medium text-neutral-600 rounded">
-                              {s.stage}
-                            </span>
-                            <span className="px-1.5 py-0.5 bg-neutral-100 text-[9px] font-medium text-neutral-600 rounded truncate max-w-[100px]">
-                              {s.hq_location}
-                            </span>
-                          </div>
-
-                          <div className="pt-2 border-t border-neutral-100 flex justify-between items-center text-[9px] font-mono text-neutral-400">
-                            <span>Raise: ${s.target_raise.toLocaleString()}</span>
-                          </div>
-
-                          {/* Fast Move dropdown on hover */}
+                        return (
                           <div
-                            onClick={e => e.stopPropagation()}
-                            className="absolute right-2 bottom-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            key={s.id}
+                            onClick={() => setSelectedStartup(s)}
+                            className="bg-white border border-neutral-200 hover:border-neutral-900 hover:shadow-2xs p-3 rounded-lg cursor-pointer transition-all space-y-2 text-xs group relative text-left"
                           >
-                            <select
-                              value={s.status}
-                              onChange={e => handleUpdateStatus(s.id, e.target.value as PipelineStatus)}
-                              className="px-1 py-0.5 bg-neutral-50 border border-neutral-200 text-[9px] font-semibold text-neutral-600 rounded outline-none cursor-pointer"
-                              title="Move Status"
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="font-semibold text-neutral-900 group-hover:underline line-clamp-1">
+                                {s.company_name}
+                              </span>
+                            </div>
+                            
+                            {showPitch && (
+                              <p className="text-neutral-500 text-[10px] leading-snug line-clamp-2">
+                                {s.one_line_pitch}
+                              </p>
+                            )}
+
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              <span className="px-2 py-0.5 bg-neutral-100 text-[9px] font-medium text-neutral-600 rounded">
+                                {s.stage}
+                              </span>
+                              <span className="px-2 py-0.5 bg-neutral-100 text-[9px] font-medium text-neutral-600 rounded truncate max-w-[100px]">
+                                {s.hq_location}
+                              </span>
+                            </div>
+
+                            <div className="pt-2 border-t border-neutral-100 flex justify-between items-center text-[9px] font-mono text-neutral-400">
+                              <span>Raise: ${s.target_raise.toLocaleString()}</span>
+                            </div>
+
+                            {/* Fast Move dropdown on hover */}
+                            <div
+                              onClick={e => e.stopPropagation()}
+                              className="absolute right-2 bottom-1 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
-                              {pipelineStatuses.map(opt => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
+                              <select
+                                value={s.status}
+                                onChange={e => handleUpdateStatus(s.id, e.target.value as PipelineStatus)}
+                                className="px-1 py-0.5 bg-neutral-50 border border-neutral-200 text-[9px] font-semibold text-neutral-600 rounded outline-none cursor-pointer"
+                                title="Move Status"
+                              >
+                                {pipelineStatuses.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>

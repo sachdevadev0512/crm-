@@ -1,68 +1,74 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import FormPortal from './components/FormPortal';
-import AdminCRM from './components/AdminCRM';
-import { Layers, UserCircle2, ShieldCheck, Cpu } from 'lucide-react';
+import { isSupabaseConfigured } from './services/dbService';
+import { ShieldAlert } from 'lucide-react';
+
+const AdminCRM = lazy(() => import('./components/AdminCRM'));
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'public' | 'admin'>('public');
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-neutral-900 text-white flex flex-col justify-center items-center p-6 text-center" id="config-error-root">
+        <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-2xl p-8 shadow-xl space-y-6">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-950/80 border border-red-900/60 text-red-400">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-xl font-semibold tracking-tight text-neutral-100">Supabase is not configured</h1>
+            <p className="text-neutral-400 text-xs leading-relaxed">
+              The database environment variables are missing or invalid. Please configure your project credentials to continue.
+            </p>
+          </div>
+          <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-lg text-left text-xs space-y-2 font-mono text-neutral-300">
+            <div className="text-neutral-500 font-bold text-[10px] uppercase tracking-wider">Required Environment Keys</div>
+            <div className="flex justify-between items-center text-[11px] pt-1 border-t border-neutral-800">
+              <span>VITE_SUPABASE_URL</span>
+              <span className="text-red-400 font-bold">MISSING / PLACEHOLDER</span>
+            </div>
+            <div className="flex justify-between items-center text-[11px] pt-1">
+              <span>VITE_SUPABASE_ANON_KEY</span>
+              <span className="text-red-400 font-bold">MISSING / PLACEHOLDER</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-neutral-500 leading-relaxed">
+            Please add actual values for these keys in the <b>Secrets panel</b> (Settings / Environment Variables) or your local <b>.env</b> configuration file.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-neutral-50/50 flex flex-col font-sans" id="mv-app-root">
-      {/* Platform Subdomain Switcher - Styled as a Professional Local Host Utility Bar */}
-      <header className="bg-neutral-900 border-b border-neutral-850 px-4 py-2.5 text-white flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0 shadow-xs">
-        <div className="flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-neutral-400" />
-          <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-300 font-mono">
-            Middha Ventures Network Preview
-          </span>
-        </div>
+    <BrowserRouter>
+      <div className="min-h-screen bg-neutral-50/50 flex flex-col font-sans" id="mv-app-root">
+        <main className="flex-1 overflow-y-auto">
+          <Routes>
+            {/* Route / -> FormPortal (public, no auth, no admin code loaded) */}
+            <Route path="/" element={<FormPortal />} />
 
-        {/* Subdomain Swapping Tabs */}
-        <div className="flex bg-neutral-950/80 p-0.5 rounded-lg border border-neutral-800/60 max-w-sm">
-          <button
-            onClick={() => setCurrentView('public')}
-            className={`px-3.5 py-1 rounded text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${
-              currentView === 'public'
-                ? 'bg-white text-neutral-900 font-bold shadow-xs'
-                : 'text-neutral-400 hover:text-white'
-            }`}
-            id="btn-nav-public"
-          >
-            <UserCircle2 className="h-3.5 w-3.5" />
-            Public Portal <span className="text-[9px] opacity-60 font-normal hidden sm:inline">(apply.mv.com)</span>
-          </button>
-          <button
-            onClick={() => setCurrentView('admin')}
-            className={`px-3.5 py-1 rounded text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${
-              currentView === 'admin'
-                ? 'bg-white text-neutral-900 font-bold shadow-xs'
-                : 'text-neutral-400 hover:text-white'
-            }`}
-            id="btn-nav-admin"
-          >
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Admin CRM <span className="text-[9px] opacity-60 font-normal hidden sm:inline">(crm.mv.com)</span>
-          </button>
-        </div>
+            {/* Route /admin/* -> the CRM shell, lazy-loaded */}
+            <Route
+              path="/admin/*"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="flex flex-col items-center justify-center min-h-screen gap-3 bg-neutral-50/50">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900"></div>
+                      <span className="text-xs text-neutral-400 font-mono">Loading Admin CRM...</span>
+                    </div>
+                  }
+                >
+                  <AdminCRM />
+                </Suspense>
+              }
+            />
 
-        <div className="hidden md:flex items-center gap-1 text-[10px] font-mono text-neutral-400">
-          <span>HOST: PORT_3000</span>
-          <span className="text-neutral-600">•</span>
-          <span>MODE: FULL_STACK</span>
-        </div>
-      </header>
-
-      {/* Main App Container */}
-      <main className="flex-1 overflow-y-auto">
-        {currentView === 'public' ? (
-          <FormPortal />
-        ) : (
-          <div className="max-w-7xl mx-auto px-4 py-8">
-            <AdminCRM />
-          </div>
-        )}
-      </main>
-    </div>
+            {/* Fallback routing */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
   );
 }
-
