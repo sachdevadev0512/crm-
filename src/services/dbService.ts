@@ -1,23 +1,60 @@
 import { createClient } from '@supabase/supabase-js';
 import { Startup, Note, Admin, AuditLog, PipelineStatus, ApplicationFormData } from '../types';
 
-// Read Supabase environment variables safely
-const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
+// Read Supabase environment variables safely and sanitize them
+const rawSupabaseUrl = ((import.meta as any).env.VITE_SUPABASE_URL || '').trim();
+const rawSupabaseAnonKey = ((import.meta as any).env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+// Clean up Supabase URL: remove trailing slash, ensure protocol prefix, and strip api path suffixes
+export const cleanSupabaseUrl = (() => {
+  let url = rawSupabaseUrl;
+  if (!url) return '';
+  // Prepend https:// if protocol is missing (e.g. yourproject.supabase.co -> https://yourproject.supabase.co)
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  // Remove trailing slashes (e.g. https://yourproject.supabase.co/ -> https://yourproject.supabase.co)
+  while (url.endsWith('/')) {
+    url = url.slice(0, -1);
+  }
+  // Strip common incorrect suffixes like /rest/v1, /rest, /auth/v1, /storage/v1, /v1
+  url = url.replace(/\/(rest|auth|storage)\/v1\/?$/i, '');
+  url = url.replace(/\/rest\/?$/i, '');
+  url = url.replace(/\/auth\/?$/i, '');
+  url = url.replace(/\/storage\/?$/i, '');
+  url = url.replace(/\/v1\/?$/i, '');
+  
+  // Remove trailing slashes again just in case
+  while (url.endsWith('/')) {
+    url = url.slice(0, -1);
+  }
+  return url;
+})();
+
+export const cleanSupabaseAnonKey = rawSupabaseAnonKey;
 
 // Detect if Supabase is properly configured
 export const isSupabaseConfigured =
-  !!supabaseUrl &&
-  supabaseUrl !== 'https://your-project-id.supabase.co' &&
-  !!supabaseAnonKey &&
-  supabaseAnonKey !== 'your-anon-key';
+  !!cleanSupabaseUrl &&
+  cleanSupabaseUrl !== 'https://your-project-id.supabase.co' &&
+  cleanSupabaseUrl !== 'your-project-id.supabase.co' &&
+  !!cleanSupabaseAnonKey &&
+  cleanSupabaseAnonKey !== 'your-anon-key';
+
+const supabaseUrl = cleanSupabaseUrl;
+const supabaseAnonKey = cleanSupabaseAnonKey;
 
 // Lazy initialize the Supabase client to avoid crashes if keys are invalid
 let supabase: ReturnType<typeof createClient> | null = null;
 export function getSupabase() {
   if (!supabase && isSupabaseConfigured) {
     try {
-      supabase = createClient(supabaseUrl, supabaseAnonKey);
+      supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+        },
+      });
     } catch (e) {
       console.error('Failed to initialize Supabase client:', e);
     }
@@ -30,8 +67,8 @@ export interface DbService {
   
   // Auth Operations
   getCurrentUser(): Promise<{ id: string; email: string; isAdmin: boolean } | null>;
-  signIn(email: string): Promise<{ success: boolean; message: string }>;
-  verifyOtp(email: string, token: string): Promise<{ success: boolean; user: any; error?: string }>;
+  signUp(email: string, password: string): Promise<{ success: boolean; user: any; error?: string }>;
+  signIn(email: string, password: string): Promise<{ success: boolean; user: any; error?: string }>;
   signOut(): Promise<void>;
   
   // Startup Operations
@@ -53,6 +90,11 @@ export interface DbService {
   
   // CSV Import Operations
   importCSV(startups: Partial<Startup>[], user: { id: string; email: string }): Promise<{ imported: number; skipped: number; report: string[] }>;
+
+  // Admin Management Operations
+  getAdmins(): Promise<Admin[]>;
+  addAdmin(id: string, email: string): Promise<boolean>;
+  deleteAdmin(id: string): Promise<boolean>;
 }
 
 /**
@@ -91,7 +133,7 @@ class LocalSandboxServiceImpl implements DbService {
       // Seed some starting applications for previewing
       const initialStartups: Startup[] = [
         {
-          id: '1',
+          id: 'startup-1',
           company_name: 'Acme AI Solutions',
           website: 'https://acmeai.example.com',
           one_line_pitch: 'Generative AI platform for enterprise workflow automation and orchestration.',
@@ -103,7 +145,7 @@ class LocalSandboxServiceImpl implements DbService {
           founder_linkedin: 'https://linkedin.com/in/alice-johnson-demo',
           team_size: 4,
           team_background: 'Former Senior AI Research Scientist at DeepMind, and Technical Product Manager at Google.',
-          stage: 'Seed',
+          stage: 'Pre-revenue/Traction',
           funding_raised: 150000,
           target_raise: 1200000,
           traction: 'Currently in closed beta with 8 enterprise design partners. $12k in committed pilot ARR starting next month.',
@@ -114,7 +156,7 @@ class LocalSandboxServiceImpl implements DbService {
           updated_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString()
         },
         {
-          id: '2',
+          id: 'startup-2',
           company_name: 'Helix BioSystems',
           website: 'https://helixbio.example.com',
           one_line_pitch: 'Microfluidic chips for high-throughput single-cell DNA sequencing.',
@@ -136,7 +178,7 @@ class LocalSandboxServiceImpl implements DbService {
           updated_at: new Date(Date.now() - 110 * 3600 * 1000).toISOString()
         },
         {
-          id: '3',
+          id: 'startup-3',
           company_name: 'Scribe Legal Technologies',
           website: 'https://scribelegal.example.com',
           one_line_pitch: 'AI-assisted contract analysis and regulatory compliance auditing for boutique firms.',
@@ -166,7 +208,7 @@ class LocalSandboxServiceImpl implements DbService {
       const initialNotes: Note[] = [
         {
           id: 'note-1',
-          startup_id: '1',
+          startup_id: 'startup-1',
           author_id: 'admin-bootstrap-id',
           author_email: 'sachdevadev0512@gmail.com',
           content: 'The deep learning founder has an outstanding research pedigree. The market is crowded, but their agent-orchestration layer looks highly differentiated.',
@@ -177,6 +219,18 @@ class LocalSandboxServiceImpl implements DbService {
       this.saveItems(this.notesKey, initialNotes);
     }
 
+    if (!localStorage.getItem(this.adminsKey)) {
+      const initialAdmins: Admin[] = [
+        {
+          id: 'admin-bootstrap-id',
+          email: 'sachdevadev0512@gmail.com',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      ];
+      this.saveItems(this.adminsKey, initialAdmins);
+    }
+
     if (!localStorage.getItem(this.logsKey)) {
       const initialLogs: AuditLog[] = [
         {
@@ -184,7 +238,7 @@ class LocalSandboxServiceImpl implements DbService {
           user_id: null,
           user_email: 'System Applicant',
           action: 'Application submitted',
-          target_id: '1',
+          target_id: 'startup-1',
           target_name: 'Acme AI Solutions',
           details: { message: 'Startup applied via public portal.' },
           created_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString()
@@ -194,7 +248,7 @@ class LocalSandboxServiceImpl implements DbService {
           user_id: null,
           user_email: 'System Applicant',
           action: 'Application submitted',
-          target_id: '2',
+          target_id: 'startup-2',
           target_name: 'Helix BioSystems',
           details: { message: 'Startup applied via public portal.' },
           created_at: new Date(Date.now() - 120 * 3600 * 1000).toISOString()
@@ -215,57 +269,27 @@ class LocalSandboxServiceImpl implements DbService {
     return { ...user, isAdmin };
   }
 
-  async signIn(email: string) {
-    // Return mock verification code for simple OTP simulation
-    return { success: true, message: `OTP code sent to ${email} (Use code: '123456' in sandbox mode)` };
-  }
-
-  async verifyOtp(email: string, token: string) {
-    if (token !== '123456') {
-      return { success: false, user: null, error: 'Invalid verification code' };
-    }
-
+  async signUp(email: string, password: string) {
     const userId = 'user-' + email.replace(/[@.]/g, '-');
     const user = { id: userId, email };
     
-    // Check if admins table is empty (first time setup)
+    // Check if admin table is empty (for bootstrapping)
     const admins = this.getItems<Admin>(this.adminsKey);
-    if (admins.length === 0) {
-      // Create first admin automatically
-      const newAdmin: Admin = {
-        id: userId,
-        email,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      admins.push(newAdmin);
-      this.saveItems(this.adminsKey, admins);
-      
-      // Log it
-      const logs = this.getItems<AuditLog>(this.logsKey);
-      logs.unshift({
-        id: Math.random().toString(),
-        user_id: userId,
-        user_email: email,
-        action: 'Admin bootstrapped',
-        target_id: userId,
-        target_name: email,
-        details: { message: 'First administrator bootstrapped automatically.' },
-        created_at: new Date().toISOString()
-      });
-      this.saveItems(this.logsKey, logs);
-    } else {
-      // Check if user is in admins list
-      const isAdminUser = admins.some(a => a.id === userId);
-      if (!isAdminUser) {
-        // Still save active user, but UI will block access and show unauthorized
-        localStorage.setItem(this.activeUserKey, JSON.stringify(user));
-        return { success: true, user: { ...user, isAdmin: false } };
-      }
-    }
+    const isNowAdmin = admins.some(a => a.id === userId);
 
     localStorage.setItem(this.activeUserKey, JSON.stringify(user));
-    return { success: true, user: { ...user, isAdmin: true } };
+    return { success: true, user: { ...user, isAdmin: isNowAdmin } };
+  }
+
+  async signIn(email: string, password: string) {
+    const userId = 'user-' + email.replace(/[@.]/g, '-');
+    const user = { id: userId, email };
+    
+    const admins = this.getItems<Admin>(this.adminsKey);
+    const isNowAdmin = admins.some(a => a.id === userId);
+
+    localStorage.setItem(this.activeUserKey, JSON.stringify(user));
+    return { success: true, user: { ...user, isAdmin: isNowAdmin } };
   }
 
   async signOut() {
@@ -274,7 +298,7 @@ class LocalSandboxServiceImpl implements DbService {
 
   async submitApplication(data: ApplicationFormData) {
     const startups = this.getItems<Startup>(this.startupsKey);
-    const newId = Math.random().toString(36).substring(2, 11);
+    const newId = 'startup-' + Math.random().toString(36).substring(2, 11);
     
     // Simulate pitch deck file path saving
     const pitchDeckPath = `pitch-decks/${newId}_${data.pitch_deck?.name || 'pitch_deck.pdf'}`;
@@ -454,7 +478,6 @@ class LocalSandboxServiceImpl implements DbService {
   }
 
   async getSignedUrl(path: string) {
-    // In local sandbox, just return a mock document viewer link or standard asset URL
     return `https://documents.example.com/viewer?file=${encodeURIComponent(path)}`;
   }
 
@@ -478,7 +501,6 @@ class LocalSandboxServiceImpl implements DbService {
         continue;
       }
 
-      // Check duplicate by company name (case-insensitive) or website or email
       const isDuplicate = existingStartups.some(
         s =>
           s.company_name.toLowerCase() === item.company_name?.toLowerCase() ||
@@ -491,7 +513,7 @@ class LocalSandboxServiceImpl implements DbService {
         continue;
       }
 
-      const newId = Math.random().toString(36).substring(2, 11);
+      const newId = 'startup-' + Math.random().toString(36).substring(2, 11);
       const newStartup: Startup = {
         id: newId,
         company_name: item.company_name,
@@ -505,7 +527,7 @@ class LocalSandboxServiceImpl implements DbService {
         founder_linkedin: item.founder_linkedin || 'https://linkedin.com',
         team_size: Number(item.team_size || 1),
         team_background: item.team_background || 'N/A',
-        stage: item.stage || 'Seed',
+        stage: item.stage || 'Pre-revenue/Traction',
         funding_raised: Number(item.funding_raised || 0),
         target_raise: Number(item.target_raise || 100000),
         traction: item.traction || 'N/A',
@@ -537,6 +559,33 @@ class LocalSandboxServiceImpl implements DbService {
     this.saveItems(this.logsKey, logs);
 
     return { imported: importedCount, skipped: skippedCount, report };
+  }
+
+  async getAdmins() {
+    return this.getItems<Admin>(this.adminsKey);
+  }
+
+  async addAdmin(id: string, email: string) {
+    const admins = this.getItems<Admin>(this.adminsKey);
+    if (admins.some(a => a.id === id || a.email === email)) {
+      throw new Error('Admin already exists');
+    }
+    const newAdmin: Admin = {
+      id,
+      email,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    admins.push(newAdmin);
+    this.saveItems(this.adminsKey, admins);
+    return true;
+  }
+
+  async deleteAdmin(id: string) {
+    let admins = this.getItems<Admin>(this.adminsKey);
+    admins = admins.filter(a => a.id !== id);
+    this.saveItems(this.adminsKey, admins);
+    return true;
   }
 }
 
@@ -571,94 +620,47 @@ class RealSupabaseServiceImpl implements DbService {
     };
   }
 
-  async signIn(email: string) {
+  async signUp(email: string, password: string) {
     const client: any = getSupabase();
     if (!client) throw new Error('Supabase client is not configured');
 
-    const redirectUrl = (import.meta as any).env.VITE_APP_URL || window.location.origin;
-    
-    // Using passwordless signin (magic link / OTP)
-    const { error } = await client.auth.signInWithOtp({
+    const { data, error } = await client.auth.signUp({
       email,
-      options: {
-        emailRedirectTo: redirectUrl,
-      },
+      password,
     });
 
     if (error) {
       throw error;
     }
 
-    return { success: true, message: 'Magic link / OTP code sent successfully! Check your email.' };
+    return { success: true, user: data.user };
   }
 
-  async verifyOtp(email: string, token: string) {
+  async signIn(email: string, password: string) {
     const client: any = getSupabase();
     if (!client) throw new Error('Supabase client is not configured');
 
-    // Verify OTP token
-    const { data, error } = await client.auth.verifyOtp({
+    const { data, error } = await client.auth.signInWithPassword({
       email,
-      token,
-      type: 'magiclink',
+      password,
     });
 
     if (error) {
-      return { success: false, user: null, error: error.message };
+      throw error;
     }
 
-    const user = data.user;
-    if (!user) {
-      return { success: false, user: null, error: 'User registration failed' };
-    }
-
-    // Checking if public.admins is empty for first-time bootstrap
-    const { count, error: countError } = await client
-      .from('admins')
-      .select('id', { count: 'exact', head: true });
-
-    if (countError) {
-      console.error('Error checking admins count:', countError);
-    }
-
-    const adminsCount = count || 0;
-
-    if (adminsCount === 0) {
-      // First user logged in becomes admin automatically!
-      const { error: insertError } = await client
-        .from('admins')
-        .insert({
-          id: user.id,
-          email: user.email || '',
-        });
-
-      if (insertError) {
-        console.error('Failed to bootstrap first admin:', insertError);
-      } else {
-        // Log the bootstrap event
-        await client.from('audit_logs').insert({
-          user_id: user.id,
-          user_email: user.email,
-          action: 'Admin bootstrapped',
-          target_id: user.id,
-          target_name: user.email || '',
-          details: { message: 'First administrator bootstrapped automatically.' }
-        });
-      }
-    }
-
-    // Re-check admin status
+    // Check if they are admin
     const { data: adminRecord } = await client
       .from('admins')
       .select('id')
-      .eq('id', user.id)
+      .eq('id', data.user?.id)
       .maybeSingle();
 
     return {
       success: true,
       user: {
-        id: user.id,
-        email: user.email || '',
+        id: data.user?.id || '',
+        email: data.user?.email || '',
         isAdmin: !!adminRecord
       }
     };
@@ -730,14 +732,24 @@ class RealSupabaseServiceImpl implements DbService {
     const insertedId = insertedData?.id || '';
 
     // 3. Write Audit Log
-    await client.from('audit_logs').insert({
-      user_id: null,
-      user_email: data.founder_email,
-      action: 'Application submitted',
-      target_id: insertedId,
-      target_name: data.company_name,
-      details: { sector: data.sector, target_raise: data.target_raise }
-    });
+    // For anonymous public submissions, direct audit log insertion is blocked via RLS policies.
+    // The secure database trigger 'tr_log_startup_submission' handles this automatically.
+    // We only attempt direct insertion if the current user is authenticated (e.g. an admin importing).
+    try {
+      const { data: { user } } = await client.auth.getUser();
+      if (user) {
+        await client.from('audit_logs').insert({
+          user_id: user.id,
+          user_email: user.email,
+          action: 'Application submitted',
+          target_id: insertedId,
+          target_name: data.company_name,
+          details: { sector: data.sector, target_raise: data.target_raise }
+        });
+      }
+    } catch (e) {
+      console.warn('Anonymous client-side audit log skipped (handled securely by database trigger):', e);
+    }
 
     return { success: true, id: insertedId };
   }
@@ -922,18 +934,32 @@ class RealSupabaseServiceImpl implements DbService {
   }
 
   async getSignedUrl(path: string) {
+    if (!path || !path.trim()) {
+      return '';
+    }
     const client: any = getSupabase();
     if (!client) return '';
 
+    // Sanitize the storage path: remove double/multiple slashes and remove leading slash
+    let cleanPath = path.trim().replace(/\/+/g, '/');
+    if (cleanPath.startsWith('/')) {
+      cleanPath = cleanPath.slice(1);
+    }
+
+    // Guard against empty path or generic bucket directory names that can trigger invalid path API errors
+    if (!cleanPath || cleanPath === 'pitch-decks' || cleanPath === 'pitch-decks/') {
+      return '';
+    }
+
     const { data, error } = await client.storage
       .from('pitch-decks')
-      .createSignedUrl(path, 3600); // 1 hour expiration
+      .createSignedUrl(cleanPath, 3600); // 1 hour expiration
 
     if (error) {
       throw error;
     }
 
-    return data.signedUrl;
+    return data.signedUrl || '';
   }
 
   async getAuditLogs() {
@@ -997,7 +1023,7 @@ class RealSupabaseServiceImpl implements DbService {
         founder_linkedin: item.founder_linkedin || 'https://linkedin.com',
         team_size: Number(item.team_size || 1),
         team_background: item.team_background || 'N/A',
-        stage: item.stage || 'Seed',
+        stage: item.stage || 'Pre-revenue/Traction',
         funding_raised: Number(item.funding_raised || 0),
         target_raise: Number(item.target_raise || 100000),
         traction: item.traction || 'N/A',
@@ -1035,6 +1061,53 @@ class RealSupabaseServiceImpl implements DbService {
     }
 
     return { imported, skipped, report };
+  }
+
+  async getAdmins() {
+    const client: any = getSupabase();
+    if (!client) return [];
+
+    const { data, error } = await client
+      .from('admins')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return (data || []) as Admin[];
+  }
+
+  async addAdmin(id: string, email: string) {
+    const client: any = getSupabase();
+    if (!client) throw new Error('Supabase client is not configured');
+
+    const { error } = await client
+      .from('admins')
+      .insert({ id, email });
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
+  }
+
+  async deleteAdmin(id: string) {
+    const client: any = getSupabase();
+    if (!client) throw new Error('Supabase client is not configured');
+
+    const { error } = await client
+      .from('admins')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
   }
 }
 

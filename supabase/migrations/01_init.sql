@@ -3,8 +3,9 @@
 -- Save and run this inside your Supabase SQL Editor.
 -- -------------------------------------------------------------
 
--- Enable UUID generator extension
+-- Enable UUID generator extension and pgcrypto consistently
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- 1. Create ADMINS Table
 CREATE TABLE IF NOT EXISTS public.admins (
@@ -140,6 +141,10 @@ CREATE POLICY "Allow bootstrap admin" ON public.admins
         AND id = auth.uid()
     );
 
+-- Allow existing admins to register/create subsequent admins (preventing privilege escalation)
+CREATE POLICY "Admins insert access" ON public.admins
+    FOR INSERT WITH CHECK (public.is_admin());
+
 
 -- B. STARTUPS table policies
 -- Public users can submit startup applications
@@ -170,13 +175,43 @@ CREATE POLICY "Admin delete notes" ON public.notes
 
 
 -- D. AUDIT_LOGS table policies
--- Public users can insert logs (e.g. for submissions)
-CREATE POLICY "Public insert audit logs" ON public.audit_logs
-    FOR INSERT WITH CHECK (true);
+-- Only authenticated admins can create audit logs directly (prevents fake entries)
+CREATE POLICY "Admin insert audit logs" ON public.audit_logs
+    FOR INSERT WITH CHECK (public.is_admin());
 
 -- Only admins can read audit logs
 CREATE POLICY "Admin select audit logs" ON public.audit_logs
     FOR SELECT USING (public.is_admin());
+
+
+-- Automatic Audit Logging Trigger for Startup Submissions
+-- This handles public application logs securely inside the database, running with SECURITY DEFINER
+-- bypassing direct public write access to the audit_logs table.
+CREATE OR REPLACE FUNCTION public.log_startup_submission()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.audit_logs (user_id, user_email, action, target_id, target_name, details)
+    VALUES (
+        auth.uid(), -- NULL for anonymous guest submissions
+        NEW.founder_email,
+        'Application submitted',
+        NEW.id,
+        NEW.company_name,
+        jsonb_build_object(
+            'sector', NEW.sector,
+            'target_raise', NEW.target_raise,
+            'stage', NEW.stage,
+            'logged_by', 'system_trigger'
+        )
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS tr_log_startup_submission ON public.startups;
+CREATE TRIGGER tr_log_startup_submission
+    AFTER INSERT ON public.startups
+    FOR EACH ROW EXECUTE FUNCTION public.log_startup_submission();
 
 
 -- -------------------------------------------------------------
@@ -190,10 +225,10 @@ VALUES ('pitch-decks', 'pitch-decks', false)
 ON CONFLICT (id) DO NOTHING;
 
 -- Storage RLS Policies
--- Allow anyone to upload to 'pitch-decks' folder
-CREATE POLICY "Allow public upload to pitch decks"
+-- Disallow anonymous uploads. Only authenticated users can upload to 'pitch-decks' folder
+CREATE POLICY "Allow authenticated upload to pitch decks"
 ON storage.objects FOR INSERT
-TO public
+TO authenticated
 WITH CHECK (bucket_id = 'pitch-decks');
 
 -- Allow admins full access to pitch-decks storage
